@@ -42,11 +42,19 @@ void clock_init(Clock& c, const Settings& s);
 // in-progress turn elapsed (now - turn_start_ms); other states return the banked value.
 uint32_t live_remaining_ms(const Clock& c, uint8_t side, uint32_t now);
 
-// ---- turn engine (SPEC §5) — TODO(phase 2) ---------------------------------
+// What a clock_press did, so the caller can pick the right audio cue (SPEC §9).
+enum class PressResult : uint8_t {
+  IGNORED,   // not a live press (idle side, or PAUSED/FLAGGED)
+  STARTED,   // READY -> a side's clock began running
+  SWITCHED,  // a live turn ended and the move passed to the opponent
+  FLAGGED    // the press landed exactly as the side ran out
+};
+
+// ---- turn engine (SPEC §5) -------------------------------------------------
 // A live press by `side` ends that side's turn: bank elapsed, apply increment, hand
 // the move to the other side, bump the move counter. Per the press rule (SPEC §3) a
 // press by the idle side is ignored; in READY the first press starts the OTHER side.
-void clock_press(Clock& c, uint8_t side, uint32_t now);
+PressResult clock_press(Clock& c, uint8_t side, uint32_t now);
 
 // Detect a flag: if the active side's live remaining hit 0, transition to FLAGGED.
 // Call once per frame while running. Returns true on the frame the flag fires.

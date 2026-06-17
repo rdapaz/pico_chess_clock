@@ -22,6 +22,11 @@ static constexpr int CLOCK_Y  = 96;
 struct Palette { color_t bg, on, grid; };
 
 static Palette side_palette(const Clock& c, uint8_t side) {
+  if (c.state == State::FLAGGED) {                                // game over (SPEC §8)
+    return side == c.flagged_side
+      ? Palette{ rgb(6, 1, 1), rgb(15, 5, 4), rgb(5, 1, 1) }      // loser: red
+      : Palette{ rgb(1, 5, 1), rgb(6, 15, 7), rgb(1, 4, 1) };     // winner: green
+  }
   bool active = is_running(c.state) && side == c.active;
   if (active) {
     return side == SIDE_LEFT
@@ -54,18 +59,25 @@ static void draw_side(const Clock& c, const Settings& s, uint8_t side, uint32_t 
   pen(p.bg);
   frect(x0, 0, HALF, SCREEN);
 
-  // Top strip: move count (left) + increment tag (right). Left half also names the
-  // time control (SPEC §8).
-  TimeControl tc = resolved_tc(s);
-  std::string mv  = "M" + str(static_cast<int32_t>(c.moves[side]));
-  std::string inc = "+" + str(static_cast<int32_t>(tc.inc_sec));
-  led_text(mv.c_str(), x0 + 6, 8, 2, p.on, 0, false);
-  int iw = led_text_w(inc.c_str(), 2);
-  led_text(inc.c_str(), x0 + HALF - 6 - iw, 8, 2, p.on, 0, false);
-  if (side == SIDE_LEFT) {
-    const char* nm = preset_short(s.preset);   // compact so it fits the 120px half
-    int nw = led_text_w(nm, 2);
-    led_text(nm, x0 + (HALF - nw) / 2, 24, 2, p.on, 0, false);
+  if (c.state == State::FLAGGED) {
+    // Game over: big result word per half (SPEC §8).
+    const char* word = (side == c.flagged_side) ? "TIME" : "WIN";
+    int ww = led_text_w(word, 3);
+    led_text(word, x0 + (HALF - ww) / 2, 14, 3, p.on, 0, false);
+  } else {
+    // Top strip: move count (left) + increment tag (right). Left half also names the
+    // time control (SPEC §8).
+    TimeControl tc = resolved_tc(s);
+    std::string mv  = "M" + str(static_cast<int32_t>(c.moves[side]));
+    std::string inc = "+" + str(static_cast<int32_t>(tc.inc_sec));
+    led_text(mv.c_str(), x0 + 6, 8, 2, p.on, 0, false);
+    int iw = led_text_w(inc.c_str(), 2);
+    led_text(inc.c_str(), x0 + HALF - 6 - iw, 8, 2, p.on, 0, false);
+    if (side == SIDE_LEFT) {
+      const char* nm = preset_short(s.preset);   // compact so it fits the 120px half
+      int nw = led_text_w(nm, 2);
+      led_text(nm, x0 + (HALF - nw) / 2, 24, 2, p.on, 0, false);
+    }
   }
 
   // Big centred clock (full dot grid for the LED-panel look).
@@ -87,27 +99,17 @@ void ui_draw_main(const Clock& c, const Settings& s, uint32_t now) {
   pen(4, 4, 5);
   frect(HALF - 1, 0, 2, SCREEN);
 
-  // Bottom strip: state line (SPEC §8). Running clocks speak for themselves.
-  if (c.state == State::FLAGGED) {
-    // "TIME" on the flagged (losing) half, "WIN" on the other.
-    for (uint8_t side = 0; side < 2; ++side) {
-      bool loser = (side == c.flagged_side);
-      const char* m = loser ? "TIME" : "WIN";
-      int x0 = (side == SIDE_LEFT) ? 0 : HALF;
-      int w  = led_text_w(m, 2);
-      led_text(m, x0 + (HALF - w) / 2, 218, 2,
-               loser ? rgb(15, 4, 3) : rgb(4, 14, 6), 0, false);
-    }
-  } else {
-    const char* msg = (c.state == State::READY)  ? "PRESS TO START"
-                    : (c.state == State::PAUSED) ? "PAUSED"
-                    : nullptr;
-    if (msg) {
-      int w = led_text_w(msg, 2);
-      pen(0, 0, 0);
-      frect((SCREEN - w) / 2 - 6, 214, w + 12, 20);  // clear a band behind the text
-      led_text(msg, (SCREEN - w) / 2, 218, 2, rgb(13, 13, 14), 0, false);
-    }
+  // Bottom strip: state line + control hint (SPEC §8). Running clocks speak for
+  // themselves; FLAGGED/PAUSED carry the chord hint, READY the start prompt.
+  const char* msg = (c.state == State::READY)   ? "PRESS TO START"
+                  : (c.state == State::PAUSED)  ? "PAUSED  X+A RESUME"
+                  : (c.state == State::FLAGGED) ? "HOLD B+Y NEW GAME"
+                  : nullptr;
+  if (msg) {
+    int w = led_text_w(msg, 2);
+    pen(0, 0, 0);
+    frect((SCREEN - w) / 2 - 6, 214, w + 12, 20);  // clear a band behind the text
+    led_text(msg, (SCREEN - w) / 2, 218, 2, rgb(13, 13, 14), 0, false);
   }
 }
 

@@ -42,17 +42,17 @@ static void begin_turn(Clock& c, uint8_t side, uint32_t now) {
 }
 
 // ---- turn engine (SPEC §3 press rule + §5 increment) ------------------------
-void clock_press(Clock& c, uint8_t side, uint32_t now) {
+PressResult clock_press(Clock& c, uint8_t side, uint32_t now) {
   switch (c.state) {
     case State::READY:
       // First press passes the move: it starts the OPPONENT's clock (SPEC §3), so the
       // non-first-mover taps to set the first mover running. No time banked/incremented.
       begin_turn(c, other(side), now);
-      return;
+      return PressResult::STARTED;
 
     case State::RUN_LEFT:
     case State::RUN_RIGHT: {
-      if (side != c.active) return;  // idle-side press is ignored (SPEC §3)
+      if (side != c.active) return PressResult::IGNORED;  // idle-side press ignored (SPEC §3)
 
       uint32_t elapsed = static_cast<uint32_t>(now - c.turn_start_ms);  // wrap-safe
       uint32_t banked  = c.remaining_ms[side];
@@ -60,17 +60,17 @@ void clock_press(Clock& c, uint8_t side, uint32_t now) {
         c.remaining_ms[side] = 0;    // normally catches this first; defensive here)
         c.flagged_side = side;
         c.state = State::FLAGGED;
-        return;
+        return PressResult::FLAGGED;
       }
       // Bank the time spent, then apply the Fischer increment (SPEC §5). Delay modes
       // (Simple/Bronstein) are a later phase.
       c.remaining_ms[side] = (banked - elapsed) + c.inc_ms;
       c.moves[side] += 1;
       begin_turn(c, other(side), now);  // hand the move to the opponent
-      return;
+      return PressResult::SWITCHED;
     }
 
-    default: return;  // PAUSED / FLAGGED: not a live press
+    default: return PressResult::IGNORED;  // PAUSED / FLAGGED: not a live press
   }
 }
 
@@ -85,12 +85,19 @@ bool clock_tick(Clock& c, uint32_t now) {
   return false;
 }
 
-void clock_pause(Clock& /*c*/, uint32_t /*now*/) {
-  // TODO(phase 4): bank the active side's elapsed, remember paused_from, -> PAUSED.
+void clock_pause(Clock& c, uint32_t now) {
+  if (!is_running(c.state)) return;
+  uint32_t elapsed = static_cast<uint32_t>(now - c.turn_start_ms);  // bank the live turn
+  uint32_t banked  = c.remaining_ms[c.active];
+  c.remaining_ms[c.active] = (elapsed >= banked) ? 0u : (banked - elapsed);
+  c.paused_from = c.state;       // RUN_LEFT / RUN_RIGHT — resume the same side
+  c.state       = State::PAUSED;
 }
 
-void clock_resume(Clock& /*c*/, uint32_t /*now*/) {
-  // TODO(phase 4): restore paused_from, turn_start_ms = now.
+void clock_resume(Clock& c, uint32_t now) {
+  if (c.state != State::PAUSED) return;
+  c.turn_start_ms = now;         // remaining is already banked; restart the active side
+  c.state         = c.paused_from;
 }
 
 void clock_reset(Clock& c, const Settings& s) {

@@ -33,7 +33,18 @@ static uint32_t g_x_down = 0;
 static bool     g_x_consumed = false;
 static uint32_t g_prev_btn_mask = 0;
 
-static constexpr uint32_t LONG_PRESS_MS = 800;  // hold-X to open Settings (SPEC §3)
+// Chord trackers (SPEC §3): X+A = pause/resume, B+Y = reset. Each fires once per hold.
+static uint32_t g_xa_t = 0, g_by_t = 0;
+static bool     g_xa_held = false, g_by_held = false;
+static bool     g_xa_fired = false, g_by_fired = false;
+
+// Low-time warning fired this turn, per side (re-arms when the side climbs back above
+// the warn threshold). Cleared at the start of each new game.
+static bool g_warned[2] = {false, false};
+
+static constexpr uint32_t LONG_PRESS_MS   = 800;  // hold-X to open Settings (SPEC §3)
+static constexpr uint32_t PAUSE_CHORD_MS  = 500;  // hold X+A ~0.5 s
+static constexpr uint32_t RESET_CHORD_MS  = 800;  // hold B+Y ~0.8 s
 static const uint32_t ALL_BTNS[] = {A, B, X, Y, UP, DOWN, LEFT, RIGHT};
 
 static bool was_down(uint32_t b)     { return (g_prev_btn_mask >> b) & 1u; }
@@ -42,10 +53,25 @@ static bool btn_released(uint32_t b) { return was_down(b) && !button(b); }
 // Any D-pad button pressed this frame = LEFT player's input; any A/B/X/Y = RIGHT's.
 static bool dpad_pressed()  { return pressed(UP) || pressed(DOWN) || pressed(LEFT) || pressed(RIGHT); }
 static bool abxy_pressed()  { return pressed(A) || pressed(B) || pressed(X) || pressed(Y); }
-static bool any_pressed()   { return dpad_pressed() || abxy_pressed(); }
 
 static uint8_t backlight_for(uint8_t brightness) {  // 1..10 -> ~46..100
   return static_cast<uint8_t>(40 + brightness * 6);
+}
+
+// Start a fresh game from the current settings and re-arm the low-time warnings.
+static void new_game() {
+  clock_reset(g_clock, g_settings);   // -> READY with the current time control
+  g_warned[SIDE_LEFT] = g_warned[SIDE_RIGHT] = false;
+}
+
+// Run a live press through the engine and play the matching cue (SPEC §9).
+static void press_side(uint8_t side, uint32_t now) {
+  switch (clock_press(g_clock, side, now)) {
+    case PressResult::STARTED:
+    case PressResult::SWITCHED: audio_cue_click(g_settings); break;  // confirmation tick
+    case PressResult::FLAGGED:  audio_cue_flag(g_settings);  break;
+    default: break;  // IGNORED (idle-side press)
+  }
 }
 
 // ---- RGB LED (SPEC §4) -------------------------------------------------------
@@ -89,40 +115,58 @@ static void led_update(uint32_t now) {
 
 // ---- input -------------------------------------------------------------------
 static void handle_game_input(uint32_t now) {
-  // Press rule (SPEC §3): D-pad = LEFT player, A/B/X/Y = RIGHT player. clock_press()
-  // enforces "only the running side's press is live" and the READY pass-the-move start.
-  switch (g_clock.state) {
-    case State::FLAGGED:
-      // Phase-2 stopgap so a 3+2 game is replayable: any button -> READY. Phase 4
-      // replaces this with the B+Y reset chord and a proper game-over screen.
-      if (any_pressed()) clock_reset(g_clock, g_settings);
-      return;
+  // ---- chords first (SPEC §3); a held chord suppresses single-press actions --------
+  // Both partner buttons held together = a chord, not a turn-end. (A single press never
+  // has its partner down, so it still passes straight through below.)
+  bool xa = button(X) && button(A);   // pause / resume
+  bool by = button(B) && button(Y);   // reset -> READY
 
+  if (xa) {
+    g_x_consumed = true;              // X is in a chord — don't let its release start a game
+    if (!g_xa_held) { g_xa_held = true; g_xa_t = now; g_xa_fired = false; }
+    else if (!g_xa_fired && static_cast<uint32_t>(now - g_xa_t) >= PAUSE_CHORD_MS) {
+      if (is_running(g_clock.state))           { clock_pause(g_clock, now);  audio_cue_click(g_settings); }
+      else if (g_clock.state == State::PAUSED) { clock_resume(g_clock, now); audio_cue_click(g_settings); }
+      g_xa_fired = true;   // only pause/resume act; in READY/FLAGGED the chord is a no-op
+    }
+  } else { g_xa_held = false; }
+
+  if (by) {
+    if (!g_by_held) { g_by_held = true; g_by_t = now; g_by_fired = false; }
+    else if (!g_by_fired && static_cast<uint32_t>(now - g_by_t) >= RESET_CHORD_MS) {
+      new_game();
+      audio_cue_click(g_settings);
+      g_by_fired = true;
+    }
+  } else { g_by_held = false; }
+
+  if (xa || by) return;  // a chord is being held -> no turn-end / start this frame
+
+  // ---- single-press actions (SPEC §3): D-pad = LEFT, A/B/X/Y = RIGHT ---------------
+  switch (g_clock.state) {
     case State::READY:
-      // X is overloaded in READY: hold (~0.8 s) opens Settings; a tap is a RIGHT press
-      // (passes the move to the first mover). Other buttons act on press.
+      // X is overloaded in READY: hold X alone (~0.8 s) opens Settings; a tap is a RIGHT
+      // press (passes the move to the first mover). A/B/Y and the D-pad act on press.
       if (pressed(X)) { g_x_down = now; g_x_consumed = false; }
-      if (button(X) && !g_x_consumed &&
+      if (button(X) && !button(A) && !g_x_consumed &&
           static_cast<uint32_t>(now - g_x_down) >= LONG_PRESS_MS) {
         g_mode = Mode::SETTINGS;
         g_sel = 0;
         g_x_consumed = true;
         return;
       }
-      if (btn_released(X) && !g_x_consumed) clock_press(g_clock, SIDE_RIGHT, now);  // X tap
-      if (pressed(A) || pressed(B) || pressed(Y)) clock_press(g_clock, SIDE_RIGHT, now);
-      if (dpad_pressed())                         clock_press(g_clock, SIDE_LEFT, now);
+      if (btn_released(X) && !g_x_consumed)        press_side(SIDE_RIGHT, now);  // X tap
+      if (pressed(A) || pressed(B) || pressed(Y))  press_side(SIDE_RIGHT, now);
+      if (dpad_pressed())                          press_side(SIDE_LEFT, now);
       return;
 
     case State::RUN_LEFT:
     case State::RUN_RIGHT:
-      if (abxy_pressed()) clock_press(g_clock, SIDE_RIGHT, now);
-      if (dpad_pressed()) clock_press(g_clock, SIDE_LEFT, now);
-      // TODO(phase 4): chords — hold X+A pause/resume, hold B+Y reset; press-click,
-      //   low-time, and flag audio cues.
+      if (abxy_pressed()) press_side(SIDE_RIGHT, now);
+      if (dpad_pressed()) press_side(SIDE_LEFT, now);
       return;
 
-    default: return;  // PAUSED (phase 4)
+    default: return;  // PAUSED -> resume via X+A; FLAGGED -> reset via B+Y
   }
 }
 
@@ -146,14 +190,28 @@ static void handle_settings_input() {
   if (pressed(Y)) {                         // close & save — the only flash write (SPEC §7)
     g_mode = Mode::GAME;
     storage_save_now(g_settings);
-    if (g_clock.state == State::READY) clock_init(g_clock, g_settings);  // reflect new control
+    if (g_clock.state == State::READY) new_game();  // reflect new control (Settings open only in READY)
+  }
+}
+
+// Low-time warning beep when the active side first crosses warn_sec (SPEC §9). Re-arms
+// once that side climbs back above the threshold (e.g. after an increment).
+static void update_lowtime_warning(uint32_t now) {
+  if (!is_running(g_clock.state) || g_settings.warn_sec == 0) return;
+  uint8_t  a       = g_clock.active;
+  uint32_t warn_ms = static_cast<uint32_t>(g_settings.warn_sec) * 1000u;
+  uint32_t rem     = live_remaining_ms(g_clock, a, now);
+  if (rem <= warn_ms) {
+    if (!g_warned[a]) { audio_cue_lowtime(g_settings); g_warned[a] = true; }
+  } else {
+    g_warned[a] = false;
   }
 }
 
 // ---- picosystem callbacks ----------------------------------------------------
 void init() {
   storage_load(g_settings);     // CRC-checked; defaults on first run / corrupt
-  clock_init(g_clock, g_settings);
+  new_game();
   audio_init();
   ui_init();
   backlight(backlight_for(g_settings.brightness));
@@ -163,9 +221,12 @@ void update(uint32_t /*tick*/) {
   uint32_t now = time();        // ms clock. Never use tick for durations.
 
   // Flag detection first, so a press on the same frame the clock hits 0 doesn't save a
-  // side that already ran out. Skipping input on the firing frame also stops a player
-  // mashing their button at time-out from instantly tripping the FLAGGED reset.
-  bool just_flagged = clock_tick(g_clock, now);  // TODO(phase 4): flag-alarm cue here.
+  // side that already ran out; the flag alarm fires on that frame (SPEC §9). Skipping
+  // input on the firing frame also avoids a chord button registering a stray action.
+  bool just_flagged = clock_tick(g_clock, now);
+  if (just_flagged) audio_cue_flag(g_settings);
+
+  update_lowtime_warning(now);
 
   if (g_mode == Mode::GAME) { if (!just_flagged) handle_game_input(now); }
   else                      handle_settings_input();
