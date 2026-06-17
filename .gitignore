@@ -1,0 +1,27 @@
+# Build output
+/build/
+*.uf2
+*.elf
+*.bin
+*.map
+*.dis
+*.hex
+
+# Vendored SDKs (only if a local copy is checked out; by default the chess clock
+# reuses the SDKs vendored in pomodoro_timer/third_party via PICO_SDK_PATH — SPEC §11).
+/third_party/
+
+# NOTE: pico_sdk_import.cmake is intentionally committed here (unlike pomodoro_timer,
+# which regenerates it from its vendored SDK) — this project has no local SDK to copy
+# it from at configure time.
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.cache/
+compile_commands.json
+*.swp
+.DS_Store
+Thumbs.db
+# Microsoft Office lock / owner temp files (created while a doc is open)
+~$*

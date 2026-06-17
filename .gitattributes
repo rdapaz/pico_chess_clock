@@ -1,0 +1,10 @@
+# Keep shell scripts LF so they run under WSL/bash even when checked out on Windows.
+*.sh   text eol=lf
+# C/C++ sources normalised to LF.
+*.cpp  text eol=lf
+*.hpp  text eol=lf
+*.h    text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+# Binary deliverables — never normalise.
+*.docx binary
