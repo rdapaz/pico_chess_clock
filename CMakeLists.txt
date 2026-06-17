@@ -46,7 +46,11 @@ if(NOT LAUNCHER_SDK)
     set(LAUNCHER_SDK "${CMAKE_CURRENT_LIST_DIR}/../picosystem_launcher/launcher_sdk")
 endif()
 include(${LAUNCHER_SDK}/app_slot.cmake)
-launcher_app(chess_clock)          # standalone now; SLOT n for the launcher
+if (DEFINED APP_SLOT)
+    launcher_app(chess_clock SLOT ${APP_SLOT})  # chain-loaded by the launcher
+else()
+    launcher_app(chess_clock)                    # standalone @ 0x10000000
+endif()
 
 # --- Optional picosystem build flags (uncomment as needed) ---
 # pixel_double(chess_clock)         # render 120x120 doubled to 240x240 (faster, chunkier)
