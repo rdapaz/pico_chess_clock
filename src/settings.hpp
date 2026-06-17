@@ -54,6 +54,19 @@ inline const char* preset_name(uint8_t preset) {
   }
 }
 
+// Compact label for tight spots (settings value column, main-screen top strip).
+inline const char* preset_short(uint8_t preset) {
+  switch (preset) {
+    case PRESET_BULLET_1_0:     return "1+0";
+    case PRESET_BLITZ_3_2:      return "3+2";
+    case PRESET_BLITZ_5_0:      return "5+0";
+    case PRESET_RAPID_10_5:     return "10+5";
+    case PRESET_RAPID_15_10:    return "15+10";
+    case PRESET_CLASSICAL_30_0: return "30+0";
+    default:                    return "Custom";
+  }
+}
+
 inline const char* delay_name(uint8_t mode) {
   switch (mode) {
     case DELAY_SIMPLE:    return "Delay";
@@ -133,8 +146,8 @@ inline uint8_t* field_ptr(Settings& s, uint8_t field) {
 }
 
 // Apply a +/-1 (times step) change to a field, clamped to range. TOGGLE flips on any
-// non-zero delta; ACTION rows are handled by the UI/main. (Phase 3 wires the live
-// preset<->base/inc interplay; this clamp keeps every field individually valid.)
+// non-zero delta; ACTION rows are handled by the UI/main. Cycling the time control into
+// CUSTOM seeds base/inc from the outgoing preset, so Custom starts where you left off.
 inline void settings_adjust(Settings& s, uint8_t field, int delta) {
   if (field == F_FIRST_MOVER) {
     if (delta != 0) s.first_mover_left = !s.first_mover_left;
@@ -144,10 +157,48 @@ inline void settings_adjust(Settings& s, uint8_t field, int delta) {
   if (m.type != FieldType::VALUE && m.type != FieldType::CHOICE) return;
   uint8_t* p = field_ptr(s, field);
   if (!p) return;
-  int v = static_cast<int>(*p) + delta * static_cast<int>(m.step);
+  uint8_t old = *p;
+  int v = static_cast<int>(old) + delta * static_cast<int>(m.step);
   if (v < m.min) v = m.min;
   if (v > m.max) v = m.max;
   *p = static_cast<uint8_t>(v);
+
+  if (field == F_TIME_CONTROL && s.preset == PRESET_CUSTOM && old != PRESET_CUSTOM) {
+    TimeControl tc = preset_tc(old);     // seed Custom from the preset you came from
+    s.base_min = tc.base_min;
+    s.inc_sec  = tc.inc_sec;
+  }
+}
+
+// ---- visible-field helpers (Settings screen) --------------------------------
+// The Custom rows (Base/Increment) only show when the preset is CUSTOM; the Delay row
+// is hidden until the delay modes land (SPEC §12 phase 6). The field stays in the model
+// + flash record either way so persistence is stable across phases.
+inline bool field_visible(const Settings& s, uint8_t field) {
+  if (field == F_DELAY) return false;
+  if ((field == F_BASE || field == F_INCREMENT) && s.preset != PRESET_CUSTOM) return false;
+  return true;
+}
+
+// Fill `out` (size >= FIELD_COUNT) with the currently-visible field ids, in order;
+// returns the count.
+inline uint8_t visible_fields(const Settings& s, uint8_t* out) {
+  uint8_t n = 0;
+  for (uint8_t f = 0; f < FIELD_COUNT; ++f) {
+    if (field_visible(s, f)) out[n++] = f;
+  }
+  return n;
+}
+
+// Next/previous visible field id relative to `sel` (wraps). dir = +1 / -1.
+inline uint8_t field_step(const Settings& s, uint8_t sel, int dir) {
+  uint8_t list[FIELD_COUNT];
+  uint8_t n = visible_fields(s, list);
+  if (n == 0) return sel;
+  int idx = 0;
+  for (uint8_t i = 0; i < n; ++i) if (list[i] == sel) { idx = i; break; }
+  idx = (idx + dir + n) % n;
+  return list[idx];
 }
 
 }  // namespace chess

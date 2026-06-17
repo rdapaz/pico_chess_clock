@@ -127,8 +127,9 @@ static void handle_game_input(uint32_t now) {
 }
 
 static void handle_settings_input() {
-  if (pressed(UP))   g_sel = (g_sel + FIELD_COUNT - 1) % FIELD_COUNT;
-  if (pressed(DOWN)) g_sel = (g_sel + 1) % FIELD_COUNT;
+  // Navigation skips hidden rows (Custom base/inc unless preset==CUSTOM; Delay phase 6).
+  if (pressed(UP))   g_sel = field_step(g_settings, g_sel, -1);
+  if (pressed(DOWN)) g_sel = field_step(g_settings, g_sel, +1);
 
   if (g_sel == F_EXIT) {
     if (pressed(A)) {                       // Exit to launcher (SPEC §2)
@@ -136,13 +137,13 @@ static void handle_settings_input() {
       launcher::return_to_launcher();       // standalone: harmless restart
     }
   } else {
-    if (pressed(LEFT))  { settings_adjust(g_settings, g_sel, -1); storage_mark_dirty(); }
-    if (pressed(RIGHT)) { settings_adjust(g_settings, g_sel, +1); storage_mark_dirty(); }
-    if (pressed(A))     g_sel = (g_sel + 1) % FIELD_COUNT;  // confirm / next field
+    if (pressed(LEFT))  settings_adjust(g_settings, g_sel, -1);
+    if (pressed(RIGHT)) settings_adjust(g_settings, g_sel, +1);
+    if (pressed(A))     g_sel = field_step(g_settings, g_sel, +1);  // confirm / next field
   }
 
-  if (pressed(B)) g_sel = (g_sel + FIELD_COUNT - 1) % FIELD_COUNT;
-  if (pressed(Y)) {                         // close & save
+  if (pressed(B)) g_sel = field_step(g_settings, g_sel, -1);
+  if (pressed(Y)) {                         // close & save — the only flash write (SPEC §7)
     g_mode = Mode::GAME;
     storage_save_now(g_settings);
     if (g_clock.state == State::READY) clock_init(g_clock, g_settings);  // reflect new control
@@ -172,7 +173,7 @@ void update(uint32_t /*tick*/) {
   audio_update();
   backlight(backlight_for(g_settings.brightness));
   led_update(now);
-  storage_flush(g_settings, now);
+  // No per-frame flash write: settings persist only on Settings-close (SPEC §7).
 
   // Remember button state for next frame's release detection.
   g_prev_btn_mask = 0;

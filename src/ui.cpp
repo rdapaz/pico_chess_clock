@@ -63,7 +63,7 @@ static void draw_side(const Clock& c, const Settings& s, uint8_t side, uint32_t 
   int iw = led_text_w(inc.c_str(), 2);
   led_text(inc.c_str(), x0 + HALF - 6 - iw, 8, 2, p.on, 0, false);
   if (side == SIDE_LEFT) {
-    const char* nm = preset_name(s.preset);
+    const char* nm = preset_short(s.preset);   // compact so it fits the 120px half
     int nw = led_text_w(nm, 2);
     led_text(nm, x0 + (HALF - nw) / 2, 24, 2, p.on, 0, false);
   }
@@ -114,7 +114,7 @@ void ui_draw_main(const Clock& c, const Settings& s, uint32_t now) {
 // ---- settings screen ---------------------------------------------------------
 static std::string value_str(const Settings& s, int i) {
   switch (i) {
-    case F_TIME_CONTROL: return std::string(preset_name(s.preset));
+    case F_TIME_CONTROL: return std::string(preset_short(s.preset));
     case F_BASE:         return str(static_cast<int32_t>(s.base_min)) + " min";
     case F_INCREMENT:    return str(static_cast<int32_t>(s.inc_sec)) + " s";
     case F_DELAY:        return std::string(delay_name(s.delay_mode));
@@ -136,16 +136,23 @@ void ui_draw_settings(const Settings& s, uint8_t sel) {
   pen(3, 3, 5);
   frect(0, 32, SCREEN, 1);
 
+  // Only the currently-visible rows (Custom base/inc appear when preset==CUSTOM).
+  uint8_t list[FIELD_COUNT];
+  int n = visible_fields(s, list);
+  int selpos = 0;
+  for (int i = 0; i < n; ++i) if (list[i] == sel) { selpos = i; break; }
+
   const int VIS = 5, y0 = 40, pitch = 34;
-  int first = sel - 2;
-  if (first > FIELD_COUNT - VIS) first = FIELD_COUNT - VIS;
+  int first = selpos - 2;
+  if (first > n - VIS) first = n - VIS;
   if (first < 0) first = 0;
 
   for (int v = 0; v < VIS; ++v) {
-    int i = first + v;
-    if (i >= FIELD_COUNT) break;
+    int li = first + v;
+    if (li >= n) break;
+    uint8_t f = list[li];
     int ry = y0 + v * pitch;
-    bool seld = (i == static_cast<int>(sel));
+    bool seld = (f == sel);
 
     if (seld) {
       pen(rgb(15, 11, 2));               // amber highlight bar
@@ -153,30 +160,33 @@ void ui_draw_settings(const Settings& s, uint8_t sel) {
     }
 
     color_t lab = seld ? rgb(2, 1, 0) : rgb(13, 13, 14);
-    led_text(FIELDS[i].label, 14, ry + 2, 3, lab, 0, false);
+    led_text(FIELDS[f].label, 14, ry + 2, 3, lab, 0, false);
 
-    std::string val = value_str(s, i);
+    std::string val = value_str(s, f);
     int vw = led_text_w(val.c_str(), 3);
     color_t vcol = seld ? rgb(2, 1, 0) : rgb(15, 15, 15);
     int vx = 218 - vw;
     led_text(val.c_str(), vx, ry + 2, 3, vcol, 0, false);
 
-    if (seld && FIELDS[i].type != FieldType::ACTION) {
+    if (seld && FIELDS[f].type != FieldType::ACTION) {
       led_text("<", vx - 16, ry + 2, 3, rgb(2, 1, 0), 0, false);
       led_text(">", 222, ry + 2, 3, rgb(2, 1, 0), 0, false);
     }
   }
 
-  // Scrollbar.
+  // Scrollbar (sized to the visible-row count).
   int track_y = y0, track_h = VIS * pitch - 6;
   pen(2, 2, 4);
   frect(234, track_y, 4, track_h);
-  int span = FIELD_COUNT - VIS;
-  if (span < 1) span = 1;
-  int thumb_h = track_h * VIS / FIELD_COUNT;
-  int thumb_y = track_y + (track_h - thumb_h) * first / span;
-  pen(8, 8, 11);
-  frect(234, thumb_y, 4, thumb_h);
+  if (n > VIS) {
+    int thumb_h = track_h * VIS / n;
+    int thumb_y = track_y + (track_h - thumb_h) * first / (n - VIS);
+    pen(8, 8, 11);
+    frect(234, thumb_y, 4, thumb_h);
+  } else {
+    pen(8, 8, 11);
+    frect(234, track_y, 4, track_h);   // everything fits -> full thumb
+  }
 
   int hw = led_text_w("UP/DN  L/R  Y", 2);
   led_text("UP/DN  L/R  Y", (SCREEN - hw) / 2, 222, 2, rgb(8, 8, 9), 0, false);
