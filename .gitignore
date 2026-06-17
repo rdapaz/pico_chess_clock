@@ -1,5 +1,5 @@
-# Build output
-/build/
+# Build output (build/, build-slot5/, etc.)
+/build*/
 build-*/
 *.uf2
 *.elf
