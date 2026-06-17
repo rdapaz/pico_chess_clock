@@ -31,9 +31,15 @@ static Palette side_palette(const Clock& c, uint8_t side) {
   return Palette{ rgb(1, 1, 2), rgb(6, 6, 7), rgb(2, 2, 3) };    // idle / READY / paused
 }
 
-// MM:SS, ceiling to whole seconds so 00:01 -> 00:00 only at true zero.
-static std::string mmss(uint32_t ms) {
-  uint32_t secs = (ms + 999u) / 1000u;
+// Clock text: MM:SS normally; under 20 s show SS.t (tenths) so the final seconds read
+// clearly and animate (SPEC §8).
+static std::string format_clock(uint32_t ms) {
+  if (ms < 20000u) {
+    uint32_t tenths = ms / 100u;                 // floor to 0.1 s, counts down to 0.0
+    uint32_t ss = tenths / 10u, t = tenths % 10u;
+    return str(static_cast<int32_t>(ss)) + "." + str(static_cast<int32_t>(t));
+  }
+  uint32_t secs = (ms + 999u) / 1000u;           // ceil so it shows 00:00 only at true 0
   uint32_t mm = secs / 60, ss = secs % 60;
   if (mm > 99) mm = 99;
   return (mm < 10 ? "0" : "") + str(static_cast<int32_t>(mm)) + ":" +
@@ -62,8 +68,8 @@ static void draw_side(const Clock& c, const Settings& s, uint8_t side, uint32_t 
     led_text(nm, x0 + (HALF - nw) / 2, 24, 2, p.on, 0, false);
   }
 
-  // Big centred MM:SS clock (full dot grid for the LED-panel look).
-  std::string t = mmss(live_remaining_ms(c, side, now));
+  // Big centred clock (full dot grid for the LED-panel look).
+  std::string t = format_clock(live_remaining_ms(c, side, now));
   int cw = led_text_w(t.c_str(), CLOCKCEL);
   led_text(t.c_str(), x0 + (HALF - cw) / 2, CLOCK_Y, CLOCKCEL, p.on, p.grid, true);
 }
@@ -81,23 +87,27 @@ void ui_draw_main(const Clock& c, const Settings& s, uint32_t now) {
   pen(4, 4, 5);
   frect(HALF - 1, 0, 2, SCREEN);
 
-  // Bottom strip: state line (SPEC §8). Phase 1 only reaches READY; the rest are wired
-  // for phases 2/4.
-  const char* msg = nullptr;
-  switch (c.state) {
-    case State::READY:  msg = "PRESS TO START"; break;
-    case State::PAUSED: msg = "PAUSED";         break;
-    case State::FLAGGED:
-      // TODO(phase 4): "TIME!" on c.flagged_side and "WIN" on the other half.
-      msg = "TIME";
-      break;
-    default: break;  // running: the clocks speak for themselves
-  }
-  if (msg) {
-    int w = led_text_w(msg, 2);
-    pen(0, 0, 0);
-    frect((SCREEN - w) / 2 - 6, 214, w + 12, 20);  // clear a band behind the text
-    led_text(msg, (SCREEN - w) / 2, 218, 2, rgb(13, 13, 14), 0, false);
+  // Bottom strip: state line (SPEC §8). Running clocks speak for themselves.
+  if (c.state == State::FLAGGED) {
+    // "TIME" on the flagged (losing) half, "WIN" on the other.
+    for (uint8_t side = 0; side < 2; ++side) {
+      bool loser = (side == c.flagged_side);
+      const char* m = loser ? "TIME" : "WIN";
+      int x0 = (side == SIDE_LEFT) ? 0 : HALF;
+      int w  = led_text_w(m, 2);
+      led_text(m, x0 + (HALF - w) / 2, 218, 2,
+               loser ? rgb(15, 4, 3) : rgb(4, 14, 6), 0, false);
+    }
+  } else {
+    const char* msg = (c.state == State::READY)  ? "PRESS TO START"
+                    : (c.state == State::PAUSED) ? "PAUSED"
+                    : nullptr;
+    if (msg) {
+      int w = led_text_w(msg, 2);
+      pen(0, 0, 0);
+      frect((SCREEN - w) / 2 - 6, 214, w + 12, 20);  // clear a band behind the text
+      led_text(msg, (SCREEN - w) / 2, 218, 2, rgb(13, 13, 14), 0, false);
+    }
   }
 }
 

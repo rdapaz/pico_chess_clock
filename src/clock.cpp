@@ -34,20 +34,54 @@ uint32_t live_remaining_ms(const Clock& c, uint8_t side, uint32_t now) {
   return banked;
 }
 
-// ---- turn engine — TODO(phase 2) -------------------------------------------
-// Implement per SPEC §5:
-//   elapsed = now - turn_start_ms;
-//   remaining_ms[active] = max(0, remaining_ms[active] - elapsed);
-//   remaining_ms[active] += inc_ms;            // Fischer
-//   active = other(active); turn_start_ms = now; moves[old_active]++;
-// honouring the press rule (SPEC §3): idle-side presses are ignored; in READY the
-// first press by a side starts the OTHER side's clock.
-void clock_press(Clock& /*c*/, uint8_t /*side*/, uint32_t /*now*/) {
-  // TODO(phase 2): start/stop turns + Fischer increment + flag-on-zero.
+// Begin `side`'s turn now (helper for press/start). Sets the running state + clock.
+static void begin_turn(Clock& c, uint8_t side, uint32_t now) {
+  c.active        = side;
+  c.turn_start_ms = now;
+  c.state         = (side == SIDE_LEFT) ? State::RUN_LEFT : State::RUN_RIGHT;
 }
 
-bool clock_tick(Clock& /*c*/, uint32_t /*now*/) {
-  // TODO(phase 2): if live_remaining_ms(active) == 0 -> FLAGGED, flagged_side = active.
+// ---- turn engine (SPEC §3 press rule + §5 increment) ------------------------
+void clock_press(Clock& c, uint8_t side, uint32_t now) {
+  switch (c.state) {
+    case State::READY:
+      // First press passes the move: it starts the OPPONENT's clock (SPEC §3), so the
+      // non-first-mover taps to set the first mover running. No time banked/incremented.
+      begin_turn(c, other(side), now);
+      return;
+
+    case State::RUN_LEFT:
+    case State::RUN_RIGHT: {
+      if (side != c.active) return;  // idle-side press is ignored (SPEC §3)
+
+      uint32_t elapsed = static_cast<uint32_t>(now - c.turn_start_ms);  // wrap-safe
+      uint32_t banked  = c.remaining_ms[side];
+      if (elapsed >= banked) {       // ran out exactly on the press -> flag (clock_tick
+        c.remaining_ms[side] = 0;    // normally catches this first; defensive here)
+        c.flagged_side = side;
+        c.state = State::FLAGGED;
+        return;
+      }
+      // Bank the time spent, then apply the Fischer increment (SPEC §5). Delay modes
+      // (Simple/Bronstein) are a later phase.
+      c.remaining_ms[side] = (banked - elapsed) + c.inc_ms;
+      c.moves[side] += 1;
+      begin_turn(c, other(side), now);  // hand the move to the opponent
+      return;
+    }
+
+    default: return;  // PAUSED / FLAGGED: not a live press
+  }
+}
+
+bool clock_tick(Clock& c, uint32_t now) {
+  if (!is_running(c.state)) return false;
+  if (live_remaining_ms(c, c.active, now) == 0) {   // active side hit 0 -> FLAGGED
+    c.remaining_ms[c.active] = 0;
+    c.flagged_side = c.active;
+    c.state = State::FLAGGED;
+    return true;
+  }
   return false;
 }
 
