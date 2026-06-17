@@ -86,11 +86,63 @@ static void draw_side(const Clock& c, const Settings& s, uint8_t side, uint32_t 
   led_text(t.c_str(), x0 + (HALF - cw) / 2, CLOCK_Y, CLOCKCEL, p.on, p.grid, true);
 }
 
+// Face-to-face half (settings "Facing"): the LEFT half is rotated 90° clockwise, the
+// RIGHT half 90° counter-clockwise, so a player on each side reads an upright clock.
+// Rotating the digits onto the 240px tall axis lets them be much larger than the split
+// layout's single-line MM:SS.
+static void draw_side_rot(const Clock& c, const Settings& s, uint8_t side, uint32_t now) {
+  const int x0  = (side == SIDE_LEFT) ? 0 : HALF;
+  const Rot rot = (side == SIDE_LEFT) ? Rot::CW : Rot::CCW;
+  Palette p = side_palette(c, side);
+
+  pen(p.bg);
+  frect(x0, 0, HALF, SCREEN);
+
+  // Place a rotated string: its box is (7*cell) wide by led_text_w tall. `cx_in_half` is
+  // the box's left edge within the half; it is always centred along the 240px axis.
+  auto draw_rot = [&](const char* str_, int cell, int cx_in_half, color_t on, color_t grid, bool gridded) {
+    int rotH = led_text_w(str_, cell);
+    int x = x0 + cx_in_half;
+    int y = (SCREEN - rotH) / 2;
+    led_text_rot(str_, x, y, cell, on, grid, gridded, rot);
+  };
+
+  if (c.state == State::FLAGGED) {
+    const char* word = (side == c.flagged_side) ? "TIME" : "WIN";
+    const int cell = 6;
+    draw_rot(word, cell, (HALF - 7 * cell) / 2, p.on, 0, false);  // big result, centred
+    return;
+  }
+
+  // Big rotated clock, centred across the half.
+  std::string t = format_clock(live_remaining_ms(c, side, now));
+  const int ccell = 7;                                  // ~2.3x the split-layout digits
+  draw_rot(t.c_str(), ccell, (HALF - 7 * ccell) / 2, p.on, p.grid, true);
+
+  // Small info / state line along the outer edge (away from the centre divider).
+  std::string info;
+  if (c.state == State::READY)       info = "START";
+  else if (c.state == State::PAUSED) info = "PAUSE";
+  else { info = "M" + str(static_cast<int32_t>(c.moves[side])) +
+                " +" + str(static_cast<int32_t>(resolved_tc(s).inc_sec)); }
+  const int icell = 2, ibox = 7 * icell;
+  int icx = (side == SIDE_LEFT) ? 3 : (HALF - 3 - ibox);  // outer edge of the half
+  draw_rot(info.c_str(), icell, icx, p.on, 0, false);
+}
+
 void ui_init() {}  // nothing to precompute for the LED renderer
 
 void ui_draw_main(const Clock& c, const Settings& s, uint32_t now) {
   pen(0, 0, 0);
   clear();
+
+  if (s.rotated) {  // face-to-face mode: rotated per-half clocks, no shared bottom strip
+    draw_side_rot(c, s, SIDE_LEFT, now);
+    draw_side_rot(c, s, SIDE_RIGHT, now);
+    pen(4, 4, 5);
+    frect(HALF - 1, 0, 2, SCREEN);
+    return;
+  }
 
   draw_side(c, s, SIDE_LEFT, now);
   draw_side(c, s, SIDE_RIGHT, now);
@@ -126,6 +178,7 @@ static std::string value_str(const Settings& s, int i) {
     case F_VOLUME:       return s.volume == 0 ? std::string("Mute")
                                               : str(static_cast<int32_t>(s.volume));
     case F_BRIGHT:       return str(static_cast<int32_t>(s.brightness));
+    case F_FACING:       return s.rotated ? std::string("On") : std::string("Off");
     case F_EXIT:         return std::string(">");
   }
   return "";

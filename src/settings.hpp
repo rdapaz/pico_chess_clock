@@ -85,6 +85,7 @@ struct Settings {
   uint8_t warn_sec         = 20;   // low-time warning threshold seconds (0..60)
   uint8_t volume           = 6;    // 0..10 (0 = mute)
   uint8_t brightness       = 7;    // 1..10 (LED + backlight scale)
+  bool    rotated          = false;// face-to-face: LEFT half 90° CW, RIGHT half 90° CCW
 };
 
 // Effective (base, increment) for the current settings: presets are fixed, CUSTOM
@@ -106,6 +107,7 @@ enum SettingsField : uint8_t {
   F_WARN,              // low-time warn seconds
   F_VOLUME,
   F_BRIGHT,
+  F_FACING,            // face-to-face rotation (LEFT 90° CW, RIGHT 90° CCW)
   F_EXIT,              // "Exit to launcher" -> launcher::return_to_launcher() (phase 3)
   FIELD_COUNT
 };
@@ -128,6 +130,7 @@ inline constexpr FieldMeta FIELDS[FIELD_COUNT] = {
   {"Warn",   FieldType::VALUE,  0,  60, 1},
   {"Volume", FieldType::VALUE,  0,  10, 1},
   {"Bright", FieldType::VALUE,  1,  10, 1},
+  {"Facing", FieldType::TOGGLE, 0,   1, 1},
   {"Exit",   FieldType::ACTION, 0,   0, 0},
 };
 
@@ -151,6 +154,10 @@ inline uint8_t* field_ptr(Settings& s, uint8_t field) {
 inline void settings_adjust(Settings& s, uint8_t field, int delta) {
   if (field == F_FIRST_MOVER) {
     if (delta != 0) s.first_mover_left = !s.first_mover_left;
+    return;
+  }
+  if (field == F_FACING) {
+    if (delta != 0) s.rotated = !s.rotated;
     return;
   }
   const FieldMeta& m = FIELDS[field];

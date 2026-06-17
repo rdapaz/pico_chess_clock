@@ -8,12 +8,20 @@
 
 namespace chess {
 
+// 90° rotations for face-to-face play (SPEC §8 / settings "Facing").
+enum class Rot : uint8_t { R0, CW, CCW };  // upright, 90° clockwise, 90° counter-clockwise
+
 // Pixel width of a string at the given dot pitch `cell` (5 cols + 1 gap per char).
 int led_text_w(const char* s, int cell);
 
-// Draw `s` at top-left (x,y) in the 5x7 dot font, square dots at pitch `cell`.
-// Lit dots use `on`; if `show_grid`, unlit dots are drawn in `off` (LED-panel look).
-// Returns the width drawn (px).
+// Draw `s` in the 5x7 dot font at pitch `cell`, optionally rotated. For R0, (x,y) is the
+// text's top-left; for CW/CCW it is the top-left of the rotated bounding box, which is
+// (7*cell) wide by led_text_w(s,cell) tall. Lit dots use `on`; if `show_grid`, unlit dots
+// are drawn in `off` (LED-panel look). Returns led_text_w(s,cell).
+int led_text_rot(const char* s, int x, int y, int cell,
+                 uint16_t on, uint16_t off, bool show_grid, Rot rot);
+
+// Convenience: upright text (Rot::R0). (x,y) is the top-left.
 int led_text(const char* s, int x, int y, int cell,
              uint16_t on, uint16_t off, bool show_grid);
 

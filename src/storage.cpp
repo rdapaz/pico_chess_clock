@@ -20,7 +20,7 @@
 namespace chess {
 
 static constexpr uint32_t REC_MAGIC   = 0x43484553;  // 'CHES'
-static constexpr uint16_t REC_VERSION = 1;
+static constexpr uint16_t REC_VERSION = 2;  // bumped: Settings gained `rotated`
 
 #ifndef PICO_FLASH_SIZE_BYTES
 #define PICO_FLASH_SIZE_BYTES (16u * 1024u * 1024u)  // PicoSystem = 16 MB (board header)

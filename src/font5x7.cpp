@@ -85,32 +85,48 @@ int led_text_w(const char* s, int cell) {
 }
 
 // One pass over the string drawing only lit (or only unlit) dots with the current pen.
-static int draw_pass(const char* s, int x, int y, int cell, bool want_lit) {
-  int cx = x;
+// Each dot's top-left is computed in the unrotated local frame (lx,ly) then mapped to
+// screen space per `rot`. The rotated bounding box is H wide by W tall, anchored at (x,y).
+static void draw_pass(const char* s, int x, int y, int cell, bool want_lit, Rot rot) {
   int dot = cell - 1; if (dot < 1) dot = 1;
+  const int W = led_text_w(s, cell);   // unrotated text width
+  const int H = GH * cell;             // unrotated text height
+  int cx = 0;                          // local x cursor (relative to text origin)
   for (const char* p = s; *p; ++p) {
     const uint8_t* g = glyph(*p);
     for (int r = 0; r < GH; ++r) {
       uint8_t row = g[r];
       for (int k = 0; k < GW; ++k) {
         bool lit = (row >> (GW - 1 - k)) & 1u;
-        if (lit == want_lit) frect(cx + k * cell, y + r * cell, dot, dot);
+        if (lit != want_lit) continue;
+        int lx = cx + k * cell, ly = r * cell;
+        int sx, sy;
+        switch (rot) {
+          case Rot::CW:  sx = x + (H - ly - dot); sy = y + lx;             break;
+          case Rot::CCW: sx = x + ly;             sy = y + (W - lx - dot); break;
+          default:       sx = x + lx;             sy = y + ly;             break;
+        }
+        frect(sx, sy, dot, dot);
       }
     }
     cx += ADVANCE * cell;
   }
-  return cx - x;
+}
+
+int led_text_rot(const char* s, int x, int y, int cell,
+                 uint16_t on, uint16_t off, bool show_grid, Rot rot) {
+  if (show_grid) {
+    pen(static_cast<color_t>(off));
+    draw_pass(s, x, y, cell, false, rot);
+  }
+  pen(static_cast<color_t>(on));
+  draw_pass(s, x, y, cell, true, rot);
+  return led_text_w(s, cell);
 }
 
 int led_text(const char* s, int x, int y, int cell,
              uint16_t on, uint16_t off, bool show_grid) {
-  if (show_grid) {
-    pen(static_cast<color_t>(off));
-    draw_pass(s, x, y, cell, false);
-  }
-  pen(static_cast<color_t>(on));
-  draw_pass(s, x, y, cell, true);
-  return led_text_w(s, cell);
+  return led_text_rot(s, x, y, cell, on, off, show_grid, Rot::R0);
 }
 
 }  // namespace chess
