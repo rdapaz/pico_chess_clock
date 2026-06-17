@@ -43,7 +43,11 @@ target_link_libraries(chess_clock hardware_flash hardware_sync)
 # launcher_app(chess_clock)        -> standalone image @ 0x10000000 (test/flash now)
 # launcher_app(chess_clock SLOT n) -> one-flag switch to launcher slot n
 if(NOT LAUNCHER_SDK)
-    set(LAUNCHER_SDK "${CMAKE_CURRENT_LIST_DIR}/../picosystem_launcher/launcher_sdk")
+    if (EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../launcher_sdk/app_slot.cmake")
+        set(LAUNCHER_SDK "${CMAKE_CURRENT_LIST_DIR}/../../launcher_sdk")                    # submodule: <launcher>/apps/<app>
+    else()
+        set(LAUNCHER_SDK "${CMAKE_CURRENT_LIST_DIR}/../picosystem_launcher/launcher_sdk")   # sibling project
+    endif()
 endif()
 include(${LAUNCHER_SDK}/app_slot.cmake)
 if (DEFINED APP_SLOT)
